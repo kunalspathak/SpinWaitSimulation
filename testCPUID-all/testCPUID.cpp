@@ -11,6 +11,7 @@
 int g_proc_index = 0;
 int g_worker_core = -1;
 int g_mainthread_core = -1;
+bool g_use_low_power_p = false;
 
 const unsigned HS_CACHE_LINE_SIZE = 128;
 
@@ -145,7 +146,7 @@ DWORD WINAPI ThreadFunction_pause(LPVOID lpParam)
     return 0;
 }
 
-DWORD WINAPI ThreadFunction_tpause(LPVOID lpParam)
+DWORD WINAPI ThreadFunction_tpause_low_power(LPVOID lpParam)
 {
     size_t original_value = g_aligned_global_location.loc;
     size_t waited_count = 0;
@@ -153,12 +154,8 @@ DWORD WINAPI ThreadFunction_tpause(LPVOID lpParam)
 
     while (g_aligned_global_location.loc == original_value)
     {
-        //_umonitor(&g_aligned_global_location.loc);
-
-        //_umwait(1, g_timeout);
-        //_tpause(0, g_timeout);
-        _tpause(1, g_timeout);
-        //printf("wait exited\n");
+        int64_t tsc = __rdtsc();
+        _tpause(0, (tsc + g_timeout));
         waited_count++;
     }
 
@@ -167,7 +164,25 @@ DWORD WINAPI ThreadFunction_tpause(LPVOID lpParam)
     return 0;
 }
 
-DWORD WINAPI ThreadFunction_umwait(LPVOID lpParam)
+DWORD WINAPI ThreadFunction_tpause_high_power(LPVOID lpParam)
+{
+    size_t original_value = g_aligned_global_location.loc;
+    size_t waited_count = 0;
+    printf("original value is %Id, timeout is %I64d\n", original_value, g_timeout);
+
+    while (g_aligned_global_location.loc == original_value)
+    {
+        int64_t tsc = __rdtsc();
+        _tpause(1, (tsc + g_timeout));
+        waited_count++;
+    }
+
+    //printf("[%10s] changed to %Id and waited %s times!\n", "tpause", g_aligned_global_location.loc, formatNumber(waited_count));
+    g_waited_count = waited_count;
+    return 0;
+}
+
+DWORD WINAPI ThreadFunction_umwait_low_power(LPVOID lpParam)
 {
     size_t original_value = g_aligned_global_location.loc;
     size_t waited_count = 0;
@@ -176,8 +191,28 @@ DWORD WINAPI ThreadFunction_umwait(LPVOID lpParam)
     while (g_aligned_global_location.loc == original_value)
     {
         _umonitor((void*)&g_aligned_global_location.loc);
-        _umwait(1, g_timeout);
-        //printf("wait exited\n");
+        int64_t tsc = __rdtsc();
+        _umwait(0, (tsc + g_timeout));
+        waited_count++;
+    }
+
+    //printf("[%10s] changed to %Id and waited %s times!\n", "umwait", g_aligned_global_location.loc, formatNumber(waited_count));
+
+    g_waited_count = waited_count;
+    return 0;
+}
+
+DWORD WINAPI ThreadFunction_umwait_high_power(LPVOID lpParam)
+{
+    size_t original_value = g_aligned_global_location.loc;
+    size_t waited_count = 0;
+    printf("original value is %Id, timeout is %I64d\n", original_value, g_timeout);
+
+    while (g_aligned_global_location.loc == original_value)
+    {
+        _umonitor((void*)&g_aligned_global_location.loc);
+        int64_t tsc = __rdtsc();
+        _umwait(1, (tsc + g_timeout));
         waited_count++;
     }
 
@@ -324,6 +359,10 @@ void parse_cmd_args(int argc, char** argv)
         {
             g_mainthread_core = atoi(argv[++arg_index]);
         }
+        else if (!strcmp(argv[arg_index], "-low-power"))
+        {
+            g_use_low_power_p = (atoi(argv[++arg_index]) == 1);
+        }
 
         ++arg_index;
     }
@@ -447,7 +486,7 @@ int main(int argc, char** argv)
             printf("this machine does not support tpause!\n");
             return 1;
         }
-        proc = ThreadFunction_tpause;
+        proc = (g_use_low_power_p ? ThreadFunction_tpause_low_power : ThreadFunction_tpause_high_power);
         break;
 
     case 2:
@@ -456,7 +495,7 @@ int main(int argc, char** argv)
             printf("this machine does not support umwait!\n");
             return 1;
         }
-        proc = ThreadFunction_umwait;
+        proc = (g_use_low_power_p ? ThreadFunction_umwait_low_power : ThreadFunction_umwait_high_power);
         break;
 
     case 3:
@@ -493,10 +532,11 @@ int main(int argc, char** argv)
         char res_buf[1024];
 
         // time is in us
-        sprintf_s(res_buf, sizeof(res_buf), "%s,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d\n",
+        sprintf_s(res_buf, sizeof(res_buf), "%s,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%I64d,%s\n",
             str_wait_type[g_proc_index], g_timeout, g_waited_count, (g_umode_cpu_time / 10), (g_kmode_cpu_time / 10), (g_elapsed_time / 10), g_total_cycles,
             (g_total_cycles * 10 / g_elapsed_time), // this is the # of cycles per us
-            g_total_cycles_on_thread, g_elapsed_time_us_on_thread);
+            g_total_cycles_on_thread, g_elapsed_time_us_on_thread,
+            (g_total_cycles / g_waited_count), (g_use_low_power_p ? "low power" : "high power"));
         fputs(res_buf, res_file);
     }
 
