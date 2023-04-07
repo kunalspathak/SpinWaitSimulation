@@ -18,7 +18,7 @@ EXPLORATION_EXPLOITATION_PARAMETER = 0.1
 # For reproducibility.
 SEED = 1
 
-TOTAL_ITERATIONS = 200
+TOTAL_ITERATIONS = 200 
 
 # Inner iterations to find some central value.
 INNER_ITERATIONS = 5
@@ -31,6 +31,18 @@ class OptimizationExperiment(object):
     def __init__(self, list_of_functions):
         self.list_of_functions = list_of_functions
 
+    def __fix_json(self, data):
+        split = data.split("\n")
+        fixed = "" 
+        last_line = split[-1]
+        for line in split:
+            if line == "":
+                continue
+            fixed += line + ","
+        fixed = fixed[:-1]
+        fixed = "[" + fixed + "]"
+        return fixed
+        
     def run(self):
         global EXPLORATION_EXPLOITATION_PARAMETER
         global PATH_TO_PRIME_NUMBERS_EXE
@@ -59,12 +71,11 @@ class OptimizationExperiment(object):
             # Write out results after fixing JSON file..
             with open(file_name) as f:
                 file_contents = f.read()
-                data = (fix_json(file_contents))
+                data = (self.__fix_json(file_contents))
                 output_file_name = file_name.replace("_incomplete", "") + ".json"
                 with open(output_file_name, 'w+') as o:
                     o.write(data)
 
-# Example of blackbox functions.
 def pivot_thread_count(spin_count, thread_count):
     vals = []
     for i in range(INNER_ITERATIONS):
