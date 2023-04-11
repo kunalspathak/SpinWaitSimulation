@@ -275,6 +275,28 @@ DWORD WINAPI ThreadFunction_monitorx(LPVOID lpParam)
     return 0;
 }
 
+DWORD WINAPI ThreadFunction_umonitor(LPVOID lpParam)
+{
+    size_t original_value = g_aligned_global_location.loc;
+    size_t waited_count = 0;
+    printf("original value is %Id, timeout is %I64d\n", original_value, g_timeout);
+    uint64_t start_cycles = __rdtsc();
+    auto time_start = std::chrono::steady_clock::now();
+
+    while (g_aligned_global_location.loc == original_value)
+    {
+        _umonitor((void*)&g_aligned_global_location.loc);
+    }
+
+    g_total_cycles_on_thread = __rdtsc() - start_cycles;
+    g_elapsed_time_us_on_thread = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - time_start).count();
+
+    printf("[%10s] changed to %Id and waited %s times!\n", "monitorx", g_aligned_global_location.loc, formatNumber(waited_count));
+
+    g_waited_count = waited_count;
+    return 0;
+}
+
 DWORD WINAPI ThreadFunction_mwaitx2(LPVOID lpParam)
 {
     size_t original_value = g_aligned_global_location.loc;
@@ -612,6 +634,10 @@ int main(int argc, char** argv)
 
     case 5:
         proc = ThreadFunction_monitorx;
+        break;
+
+    case 6:
+        proc = ThreadFunction_umonitor;
         break;
 
     default:
